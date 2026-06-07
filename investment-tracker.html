@@ -160,6 +160,7 @@ tbody tr:hover{background:var(--surface2)}
   <button class="tab-btn" onclick="showTab('portfolio')">Portfolio</button>
   <button class="tab-btn" onclick="showTab('npv')">NPV Calc</button>
   <button class="tab-btn" onclick="showTab('drawdown')">Drawdown</button>
+  <button class="tab-btn" onclick="showTab('fv')">Future Value</button>
 </div>
 
 <div class="status-bar">
@@ -363,6 +364,71 @@ tbody tr:hover{background:var(--surface2)}
         <table>
           <thead><tr><th>Age</th><th>Year</th><th>Start Balance</th><th>Addition</th><th>Income</th><th>Growth Earned</th><th>Drawdown</th><th>End Balance</th></tr></thead>
           <tbody id="ddTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== FUTURE VALUE CALCULATOR ===== -->
+<div id="tab-fv" class="tab-content">
+  <div class="card">
+    <div class="card-title">Future Value in Today's Dollars</div>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px">Shows what your investment will be worth in <em>real</em> terms — stripping out inflation so you can see true purchasing power. Uses the real growth rate: <strong>((1 + growth) ÷ (1 + inflation)) − 1</strong>.</p>
+    <div class="calc-grid">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="form-group">
+          <label>Starting Balance (AUD)</label>
+          <input class="input" id="fvStart" type="number" placeholder="100000">
+        </div>
+        <div class="form-group">
+          <label>Annual Growth Rate (% nominal)</label>
+          <input class="input" id="fvGrowth" type="number" step="0.1" placeholder="7">
+        </div>
+        <div class="form-group">
+          <label>Annual Inflation Rate (%)</label>
+          <input class="input" id="fvInflation" type="number" step="0.1" placeholder="2.5">
+        </div>
+        <div class="form-group">
+          <label>Number of Years</label>
+          <input class="input" id="fvPeriods" type="number" min="1" max="100" placeholder="20">
+        </div>
+        <div class="form-group">
+          <label>Annual Contribution (AUD, today's $)</label>
+          <input class="input" id="fvContrib" type="number" placeholder="10000">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
+            <input type="checkbox" id="fvContribInflAdj" checked style="accent-color:var(--accent)">
+            Grow contributions with inflation (keep real value constant)
+          </label>
+        </div>
+        <button class="btn btn-primary" onclick="calcFV()">Calculate</button>
+      </div>
+      <div id="fvSummary" style="display:none">
+        <div class="result-box" style="margin-bottom:12px">
+          <div class="label">Future Value (Today's Dollars)</div>
+          <div class="big-num pos" id="fvResult">—</div>
+          <div id="fvResultSub" style="font-size:.82rem;color:var(--muted);margin-top:6px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="tile"><div class="tile-label">Real Growth Rate</div><div class="tile-value" id="fvRealRate">—</div></div>
+          <div class="tile"><div class="tile-label">Total Contributed</div><div class="tile-value" id="fvTotalContrib">—</div></div>
+          <div class="tile"><div class="tile-label">Nominal FV</div><div class="tile-value" id="fvNominal">—</div></div>
+          <div class="tile"><div class="tile-label">Total Growth Earned</div><div class="tile-value" id="fvGrowthEarned">—</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="fvChartWrap" style="display:none;margin-top:16px">
+      <div class="card-title" style="margin-bottom:8px">Balance Over Time (Today's Dollars)</div>
+      <div class="chart-wrap">
+        <svg id="fvChart" height="200" viewBox="0 0 600 200" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="drawdown-table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Year</th><th>Contribution</th><th>Balance (Nominal)</th><th>Balance (Today's $)</th><th>Real Gain vs Start</th></tr></thead>
+          <tbody id="fvTableBody"></tbody>
         </table>
       </div>
     </div>
@@ -1245,6 +1311,123 @@ function drawDetailChart(history, currentPrice) {
     <polygon points="${fillPts}" fill="${fillColor}"/>
     <polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="1.8" stroke-linejoin="round"/>
     ${priceLineSvg}`;
+}
+
+// ═══════════════════════════════════════════════
+//  FUTURE VALUE CALCULATOR
+// ═══════════════════════════════════════════════
+function calcFV() {
+  const start      = parseFloat(document.getElementById('fvStart').value);
+  const growth     = parseFloat(document.getElementById('fvGrowth').value) / 100;
+  const inflation  = parseFloat(document.getElementById('fvInflation').value) / 100;
+  const periods    = parseInt(document.getElementById('fvPeriods').value);
+  const contrib    = parseFloat(document.getElementById('fvContrib').value) || 0;
+  const inflAdj    = document.getElementById('fvContribInflAdj').checked;
+
+  if ([start, growth, inflation, periods].some(v => isNaN(v) || v < 0)) {
+    alert('Please fill in all fields'); return;
+  }
+
+  // Real rate: strips inflation out so FV is in today's dollars
+  const realRate = (1 + growth) / (1 + inflation) - 1;
+
+  const rows = [];
+  let nominalBalance = start;
+  let nominalContrib = contrib;  // grows with inflation if inflAdj
+  let totalContributed = 0;
+
+  for (let yr = 1; yr <= periods; yr++) {
+    // Contribution at start of year (also earns growth this year)
+    const contribThisYear = contrib > 0 ? (inflAdj ? contrib * Math.pow(1 + inflation, yr - 1) : contrib) : 0;
+    nominalBalance = (nominalBalance + contribThisYear) * (1 + growth);
+    totalContributed += contribThisYear;
+
+    // Deflate to today's dollars
+    const realBalance = nominalBalance / Math.pow(1 + inflation, yr);
+    rows.push({ yr, contribThisYear, nominalBalance, realBalance });
+  }
+
+  const finalReal    = rows[rows.length - 1].realBalance;
+  const finalNominal = rows[rows.length - 1].nominalBalance;
+  const totalRealGain = finalReal - start;
+
+  // Summary tiles
+  document.getElementById('fvSummary').style.display = '';
+  document.getElementById('fvResult').textContent = aud(finalReal);
+  document.getElementById('fvResultSub').textContent =
+    `After ${periods} year${periods !== 1 ? 's' : ''} your $${start.toLocaleString('en-AU')} grows to ${aud(finalReal)} in today's purchasing power.`;
+  document.getElementById('fvRealRate').textContent = (realRate * 100).toFixed(2) + '%';
+  document.getElementById('fvTotalContrib').textContent = aud(start + totalContributed);
+  document.getElementById('fvNominal').textContent = aud(finalNominal);
+  document.getElementById('fvGrowthEarned').textContent = audSigned(totalRealGain);
+  document.getElementById('fvGrowthEarned').className = 'tile-value ' + colorClass(totalRealGain);
+
+  // Table
+  document.getElementById('fvTableBody').innerHTML = rows.map(r => {
+    const gain = r.realBalance - start;
+    return `<tr>
+      <td>${r.yr}</td>
+      <td>${r.contribThisYear > 0 ? aud(r.contribThisYear) : '—'}</td>
+      <td>${aud(r.nominalBalance)}</td>
+      <td><strong>${aud(r.realBalance)}</strong></td>
+      <td class="${colorClass(gain)}">${audSigned(gain)}</td>
+    </tr>`;
+  }).join('');
+
+  // Chart
+  drawFVChart(rows, start);
+  document.getElementById('fvChartWrap').style.display = '';
+}
+
+function drawFVChart(rows, start) {
+  const svg = document.getElementById('fvChart');
+  const W = 600, H = 200, PAD = { top: 10, right: 15, bottom: 28, left: 65 };
+  const iW = W - PAD.left - PAD.right;
+  const iH = H - PAD.top - PAD.bottom;
+  const realVals = rows.map(r => r.realBalance);
+  const nomVals  = rows.map(r => r.nominalBalance);
+  const maxV = Math.max(...nomVals) * 1.02;
+  const minV = Math.min(start, ...realVals) * 0.98;
+  const xS = i => PAD.left + (i / (rows.length - 1)) * iW;
+  const yS = v => PAD.top + iH - ((v - minV) / (maxV - minV)) * iH;
+
+  // Grid + y labels
+  const yLabels = [0,.25,.5,.75,1].map(f => {
+    const v = minV + (maxV - minV) * f;
+    const y = yS(v);
+    return `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left+iW}" y2="${y}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3,3"/>
+    <text x="${PAD.left-5}" y="${y+4}" text-anchor="end" fill="var(--muted)" font-size="9">${v>=1e6?(v/1e6).toFixed(1)+'M':v>=1e3?(v/1e3).toFixed(0)+'K':v.toFixed(0)}</text>`;
+  }).join('');
+
+  // X labels every 5 years
+  const xLabels = rows.filter(r => r.yr % 5 === 0 || r.yr === 1).map((r, _, arr) => {
+    const i = rows.indexOf(r);
+    return `<text x="${xS(i)}" y="${PAD.top+iH+16}" text-anchor="middle" fill="var(--muted)" font-size="9">Yr ${r.yr}</text>`;
+  }).join('');
+
+  // Nominal line (faded)
+  const nomPts  = rows.map((r,i) => `${xS(i).toFixed(1)},${yS(r.nominalBalance).toFixed(1)}`).join(' ');
+  // Real line (bold)
+  const realPts = rows.map((r,i) => `${xS(i).toFixed(1)},${yS(r.realBalance).toFixed(1)}`).join(' ');
+  // Fill under real line
+  const fillPts = `${xS(0)},${(PAD.top+iH).toFixed(1)} ${realPts} ${xS(rows.length-1)},${(PAD.top+iH).toFixed(1)}`;
+
+  // Legend
+  const legend = `
+    <circle cx="${PAD.left+8}" cy="${PAD.top+8}" r="4" fill="var(--accent)"/>
+    <text x="${PAD.left+16}" y="${PAD.top+12}" fill="var(--muted)" font-size="9">Today's $</text>
+    <circle cx="${PAD.left+72}" cy="${PAD.top+8}" r="4" fill="var(--yellow)" opacity="0.7"/>
+    <text x="${PAD.left+80}" y="${PAD.top+12}" fill="var(--muted)" font-size="9">Nominal</text>`;
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = `
+    <line x1="${PAD.left}" y1="${PAD.top}" x2="${PAD.left}" y2="${PAD.top+iH}" stroke="var(--border)" stroke-width="1"/>
+    <line x1="${PAD.left}" y1="${PAD.top+iH}" x2="${PAD.left+iW}" y2="${PAD.top+iH}" stroke="var(--border)" stroke-width="1"/>
+    ${yLabels}${xLabels}
+    <polyline points="${nomPts}" fill="none" stroke="var(--yellow)" stroke-width="1.2" opacity="0.5" stroke-dasharray="4,3"/>
+    <polygon points="${fillPts}" fill="var(--accent)" opacity="0.12"/>
+    <polyline points="${realPts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+    ${legend}`;
 }
 
 // ═══════════════════════════════════════════════
