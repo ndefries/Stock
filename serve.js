@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { execFile, execFileSync } = require('child_process');
@@ -168,6 +169,166 @@ function getAuthStatus() {
   };
 }
 
+// ── Yahoo Finance chart API (no auth required) ───────────────────────────────
+const YH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+function fetchChart(symbol) {
+  return new Promise((resolve, reject) => {
+    const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
+    const r = https.request({
+      hostname: 'query1.finance.yahoo.com', path, port: 443,
+      maxHeaderSize: 65536,
+      headers: { 'User-Agent': YH_UA }
+    }, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        try {
+          const d = JSON.parse(body);
+          const result = d?.chart?.result?.[0];
+          if (!result) { resolve(null); return; }
+          const meta = result.meta;
+          const q = result.indicators?.quote?.[0] || {};
+          const price = meta.regularMarketPrice;
+          const prevClose = meta.chartPreviousClose;
+          resolve({
+            symbol: meta.symbol,
+            shortName: meta.longName || meta.shortName || symbol,
+            currency: meta.currency,
+            regularMarketPrice: price,
+            regularMarketOpen: q.open?.[0] ?? null,
+            regularMarketDayHigh: q.high?.[0] ?? meta.regularMarketDayHigh ?? null,
+            regularMarketDayLow: q.low?.[0] ?? meta.regularMarketDayLow ?? null,
+            regularMarketVolume: q.volume?.[0] ?? meta.regularMarketVolume ?? null,
+            regularMarketPreviousClose: prevClose,
+            regularMarketChange: prevClose != null ? price - prevClose : null,
+            regularMarketChangePercent: prevClose != null ? ((price - prevClose) / prevClose) * 100 : null,
+            fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? null,
+            fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? null,
+          });
+        } catch(e) { resolve(null); }
+      });
+    });
+    r.on('error', () => resolve(null));
+    r.end();
+  });
+}
+
+async function yahooQuote(symbolsStr) {
+  const symbols = symbolsStr.split(',').map(s => s.trim()).filter(Boolean);
+  const results = await Promise.all(symbols.map(fetchChart));
+  return JSON.stringify({ quoteResponse: { result: results.filter(Boolean) } });
+}
+
+function fetchHtml(url) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const r = https.request({
+      hostname: u.hostname, path: u.pathname + u.search, port: 443,
+      maxHeaderSize: 131072,
+      headers: { 'User-Agent': YH_UA, 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' }
+    }, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => resolve(body));
+    });
+    r.on('error', () => resolve(''));
+    r.end();
+  });
+}
+
+function extractDataField(html, field) {
+  const m = html.match(new RegExp('data-field="' + field + '"[^>]*>([^<]+)<'));
+  return m ? m[1].trim() : null;
+}
+
+function extractRawNum(html, key) {
+  const m = html.match(new RegExp(key + '.{1,30}raw.{1,10}:([0-9]+)'));
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function extractDesc(html) {
+  const m = html.match(/longBusinessSummary.{1,20}"([^"]{80,})"/);
+  return m ? m[1] : null;
+}
+
+function extractSectorIndustry(html) {
+  const decoded = html.replace(/&quot;/g, '"').replace(/&#x27;/g, "'");
+  // Extract from anchor hrefs pointing to /sectors/ and /industries/
+  const sectorM = decoded.match(/href="\/sectors\/[^"]*"\s*[^>]*>([^<]+)</);
+  const industryM = decoded.match(/href="\/industries\/[^"]*"\s*[^>]*>([^<]+)</);
+  return {
+    sector: sectorM ? sectorM[1].trim() : null,
+    industry: industryM ? industryM[1].trim() : null,
+  };
+}
+
+function parseFormattedNum(s) {
+  if (!s) return null;
+  const map = { T: 1e12, B: 1e9, M: 1e6, K: 1e3 };
+  const m = s.match(/([\d.]+)([TBMK]?)/);
+  if (!m) return null;
+  return parseFloat(m[1]) * (map[m[2]] || 1);
+}
+
+async function fetchDetail(symbol) {
+  const [quoteHtml, profileHtml, chart, history] = await Promise.all([
+    fetchHtml(`https://finance.yahoo.com/quote/${symbol}/`),
+    fetchHtml(`https://finance.yahoo.com/quote/${symbol}/profile/`),
+    fetchChart(symbol),
+    fetchHistoryData(symbol, '1y', '1wk'),
+  ]);
+  const mcStr = extractDataField(quoteHtml, 'marketCap');
+  const { sector, industry } = extractSectorIndustry(profileHtml);
+  return {
+    ...chart,
+    marketCapStr: mcStr,
+    marketCap: parseFormattedNum(mcStr),
+    sharesOutstanding: extractRawNum(quoteHtml, 'impliedSharesOutstanding'),
+    trailingPE: parseFloat(extractDataField(quoteHtml, 'trailingPE')) || null,
+    targetMeanPrice: parseFloat(extractDataField(quoteHtml, 'targetMeanPrice')) || null,
+    description: extractDesc(profileHtml),
+    sector,
+    industry,
+    history,
+  };
+}
+
+function fetchHistoryData(symbol, range, interval) {
+  return new Promise((resolve) => {
+    const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
+    const r = https.request({
+      hostname: 'query1.finance.yahoo.com', path, port: 443,
+      maxHeaderSize: 65536,
+      headers: { 'User-Agent': YH_UA }
+    }, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        try {
+          const d = JSON.parse(body);
+          const result = d?.chart?.result?.[0];
+          if (!result) { resolve([]); return; }
+          const ts = result.timestamp || [];
+          const q = result.indicators?.quote?.[0] || {};
+          const rows = ts.map((t, i) => ({
+            date: new Date(t * 1000).toISOString().slice(0, 10),
+            open: q.open?.[i] ?? null,
+            high: q.high?.[i] ?? null,
+            low: q.low?.[i] ?? null,
+            close: q.close?.[i] ?? null,
+            volume: q.volume?.[i] ?? null,
+          })).filter(r => r.close != null);
+          resolve(rows);
+        } catch(e) { resolve([]); }
+      });
+    });
+    r.on('error', () => resolve([]));
+    r.end();
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -262,6 +423,74 @@ ACTIONS_JSON:
     try {
       const body = await readBody(req);
       fs.writeFileSync(path.join(root, 'appdata.json'), body, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch(e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // GET /api/quote?symbols=BHP.AX,CBA.AX  — proxy Yahoo Finance (avoids CORS)
+  if (req.method === 'GET' && url === '/api/quote') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const symbols = qs.get('symbols') || '';
+    if (!symbols) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'symbols required' }));
+      return;
+    }
+    try {
+      const data = await yahooQuote(symbols);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(data);
+    } catch(e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // GET /api/detail?symbol=BHP.AX
+  if (req.method === 'GET' && url === '/api/detail') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const symbol = qs.get('symbol') || '';
+    if (!symbol) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'symbol required' }));
+      return;
+    }
+    try {
+      const data = await fetchDetail(symbol);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    } catch(e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // GET /api/portfolio
+  if (req.method === 'GET' && url === '/api/portfolio') {
+    const portfolioPath = path.join(root, 'portfolio.json');
+    try {
+      const data = JSON.parse(fs.readFileSync(portfolioPath, 'utf8'));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    } catch (_) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ watchlist: [], holdings: [] }));
+    }
+    return;
+  }
+
+  // POST /api/portfolio
+  if (req.method === 'POST' && url === '/api/portfolio') {
+    try {
+      const body = await readBody(req);
+      fs.writeFileSync(path.join(root, 'portfolio.json'), body, 'utf8');
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     } catch(e) {

@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Investment Tracker</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1f2e;--surface2:#232a3e;--border:#2d3550;
+  --text:#e2e8f0;--muted:#64748b;--accent:#4f8ef7;--accent2:#6366f1;
+  --green:#34d399;--red:#f87171;--yellow:#fbbf24;
+  --radius:8px;--font:'Inter',system-ui,sans-serif;
+}
+body.light{
+  --bg:#f1f5f9;--surface:#fff;--surface2:#f8fafc;--border:#e2e8f0;
+  --text:#1e293b;--muted:#94a3b8;--accent:#3b82f6;
+}
+html{font-size:16px}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+button{cursor:pointer;font-family:inherit}
+input,select{font-family:inherit}
+
+/* Layout */
+.app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.app-header h1{font-size:1.1rem;font-weight:700;letter-spacing:-.02em;color:var(--text)}
+.app-header h1 span{color:var(--accent)}
+.theme-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:6px 10px;border-radius:var(--radius);font-size:.85rem;transition:color .2s,border-color .2s}
+.theme-btn:hover{color:var(--text);border-color:var(--accent)}
+
+.tab-bar{display:flex;background:var(--surface);border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.tab-bar::-webkit-scrollbar{display:none}
+.tab-btn{flex:1;min-width:80px;padding:12px 8px;background:none;border:none;color:var(--muted);font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid transparent;white-space:nowrap;transition:color .2s,border-color .2s}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-btn:hover:not(.active){color:var(--text)}
+
+.tab-content{display:none;padding:16px;max-width:1200px;margin:0 auto}
+.tab-content.active{display:block}
+
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.card-title{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:12px}
+
+/* Forms */
+.form-row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.form-group{display:flex;flex-direction:column;gap:4px;flex:1;min-width:100px}
+.form-group label{font-size:.75rem;color:var(--muted);font-weight:600}
+.input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:var(--radius);font-size:.9rem;width:100%;transition:border-color .2s}
+.input:focus{outline:none;border-color:var(--accent)}
+.input::placeholder{color:var(--muted)}
+.btn{padding:8px 14px;border-radius:var(--radius);border:none;font-size:.85rem;font-weight:600;transition:opacity .2s,transform .1s}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{opacity:.9}
+.btn-danger{background:transparent;border:1px solid var(--red);color:var(--red);padding:4px 8px;font-size:.78rem}
+.btn-danger:hover{background:var(--red);color:#fff}
+.btn-sm{padding:4px 10px;font-size:.78rem}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--muted)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+/* Tables */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--radius)}
+table{width:100%;border-collapse:collapse;font-size:.85rem;min-width:400px}
+th{text-align:left;padding:8px 10px;color:var(--muted);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--surface)}
+td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--surface2)}
+.tfoot-row td{font-weight:700;background:var(--surface2);border-top:1px solid var(--border)}
+
+/* Values */
+.pos{color:var(--green)}
+.neg{color:var(--red)}
+.neu{color:var(--muted)}
+.badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:.75rem;font-weight:700}
+.badge-pos{background:rgba(52,211,153,.15);color:var(--green)}
+.badge-neg{background:rgba(248,113,113,.15);color:var(--red)}
+
+/* Status bar */
+.status-bar{display:flex;align-items:center;gap:8px;font-size:.75rem;color:var(--muted);padding:8px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.status-dot.loading{background:var(--yellow);animation:pulse 1s infinite}
+.status-dot.error{background:var(--red)}
+
+/* Summary tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.tile-label{font-size:.72rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.tile-value{font-size:1.2rem;font-weight:700}
+.tile-sub{font-size:.78rem;color:var(--muted);margin-top:2px}
+
+/* Inline editable */
+.editable-cell input{background:transparent;border:none;border-bottom:1px solid var(--accent);color:var(--text);width:70px;font-size:.85rem;padding:2px 4px;text-align:right}
+.editable-cell input:focus{outline:none}
+
+/* NPV / Drawdown */
+.calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:640px){.calc-grid{grid-template-columns:1fr}}
+.result-box{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;text-align:center;margin-top:12px}
+.result-box .big-num{font-size:2rem;font-weight:800;margin:8px 0}
+.result-box .label{font-size:.78rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+
+/* Chart */
+.chart-wrap{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-top:12px;overflow-x:auto}
+.chart-wrap svg{display:block;width:100%;min-width:300px}
+
+/* CF rows */
+.cf-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.cf-row .input{flex:1}
+
+/* Drawdown table container */
+.drawdown-table-wrap{max-height:320px;overflow-y:auto;border-radius:var(--radius);border:1px solid var(--border)}
+.drawdown-table-wrap table{min-width:360px}
+
+/* Additions rows */
+.add-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+
+/* Loading spinner */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Responsive tweaks */
+@media(max-width:480px){
+  .tab-content{padding:12px 8px}
+  .card{padding:12px}
+  .tiles{grid-template-columns:1fr 1fr}
+  .tile-value{font-size:1rem}
+  .form-row{flex-direction:column}
+  .form-group{min-width:unset}
+}
+
+/* Clickable ticker */
+.ticker-link{cursor:pointer;color:var(--accent);text-decoration:underline;text-underline-offset:3px;text-decoration-color:transparent;transition:text-decoration-color .15s}
+.ticker-link:hover{text-decoration-color:var(--accent)}
+
+/* Empty state */
+.empty{text-align:center;padding:40px 20px;color:var(--muted);font-size:.9rem}
+.empty-icon{font-size:2rem;margin-bottom:8px}
+
+/* Tooltip for delayed data note */
+.data-note{font-size:.72rem;color:var(--muted);padding:6px 10px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border);margin-bottom:12px}
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <h1>ASX <span>Invest</span></h1>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div style="position:relative">
+      <input class="input" id="globalSearch" placeholder="Search ASX ticker…" style="width:160px;padding-right:32px;font-size:.82rem" onkeydown="if(event.key==='Enter')searchAndShow()" autocomplete="off">
+      <button onclick="searchAndShow()" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:.9rem">⌕</button>
+    </div>
+    <button class="theme-btn" id="themeToggle" onclick="toggleTheme()">☀ Light</button>
+  </div>
+</header>
+
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="showTab('watchlist')">Watchlist</button>
+  <button class="tab-btn" onclick="showTab('portfolio')">Portfolio</button>
+  <button class="tab-btn" onclick="showTab('npv')">NPV Calc</button>
+  <button class="tab-btn" onclick="showTab('drawdown')">Drawdown</button>
+</div>
+
+<div class="status-bar">
+  <span class="status-dot" id="statusDot"></span>
+  <span id="statusText">Loading…</span>
+</div>
+
+<!-- ===== WATCHLIST ===== -->
+<div id="tab-watchlist" class="tab-content active">
+  <div class="card">
+    <div class="card-title">Add to Watchlist</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>ASX Ticker</label>
+        <input class="input" id="wlInput" placeholder="e.g. BHP, CBA, NAB" onkeydown="if(event.key==='Enter')addToWatchlist()">
+      </div>
+      <button class="btn btn-primary" onclick="addToWatchlist()">Add</button>
+    </div>
+  </div>
+  <div class="data-note">⏱ Data is ~15–20 min delayed via Yahoo Finance (free tier). Refreshes every 60s.</div>
+  <div class="card" style="padding:0">
+    <div class="table-wrap">
+      <table id="watchlistTable">
+        <thead><tr>
+          <th>Symbol</th><th>Name</th><th>Price</th><th>Open</th><th>High</th><th>Low</th><th>Volume</th><th>Change</th><th></th>
+        </tr></thead>
+        <tbody id="watchlistBody">
+          <tr><td colspan="9" class="empty"><div class="empty-icon">👁</div>Add tickers to watch them here</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PORTFOLIO ===== -->
+<div id="tab-portfolio" class="tab-content">
+  <div class="card">
+    <div class="card-title">Add Holding</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>ASX Ticker</label>
+        <input class="input" id="phSymbol" placeholder="BHP">
+      </div>
+      <div class="form-group">
+        <label>Quantity</label>
+        <input class="input" id="phQty" type="number" min="0" placeholder="100">
+      </div>
+      <div class="form-group">
+        <label>Buy Price (AUD)</label>
+        <input class="input" id="phBuy" type="number" min="0" step="0.001" placeholder="45.20">
+      </div>
+      <div class="form-group">
+        <label>Target Price (AUD)</label>
+        <input class="input" id="phTarget" type="number" min="0" step="0.001" placeholder="55.00">
+      </div>
+      <button class="btn btn-primary" onclick="addHolding()">Add</button>
+    </div>
+  </div>
+
+  <div id="portfolioTiles" class="tiles" style="display:none">
+    <div class="tile">
+      <div class="tile-label">Book Value</div>
+      <div class="tile-value" id="tileBook">—</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Current Value</div>
+      <div class="tile-value" id="tileCurrent">—</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Total P&amp;L</div>
+      <div class="tile-value" id="tilePnl">—</div>
+      <div class="tile-sub" id="tilePnlPct">—</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Day Change</div>
+      <div class="tile-value" id="tileDay">—</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">At Target</div>
+      <div class="tile-value" id="tileTarget">—</div>
+      <div class="tile-sub" id="tileTargetGain">—</div>
+    </div>
+  </div>
+
+  <div class="data-note">⏱ Prices ~15–20 min delayed. Refreshes every 60s.</div>
+  <div class="card" style="padding:0">
+    <div class="table-wrap">
+      <table id="portfolioTable">
+        <thead><tr>
+          <th>Symbol</th><th>Qty</th><th>Buy Price</th><th>Curr Price</th><th>Book Value</th><th>Curr Value</th><th>P&amp;L $</th><th>P&amp;L %</th><th>Day %</th><th>Target $</th><th>At Target</th><th></th>
+        </tr></thead>
+        <tbody id="portfolioBody">
+          <tr><td colspan="12" class="empty"><div class="empty-icon">📈</div>Add your holdings above</td></tr>
+        </tbody>
+        <tfoot id="portfolioFoot" style="display:none"></tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== NPV CALCULATOR ===== -->
+<div id="tab-npv" class="tab-content">
+  <div class="card">
+    <div class="card-title">Net Present Value Calculator</div>
+    <div class="calc-grid">
+      <div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Initial Investment (AUD)</label>
+          <input class="input" id="npvInitial" type="number" placeholder="100000">
+        </div>
+        <div class="form-group">
+          <label>Discount Rate (%)</label>
+          <input class="input" id="npvRate" type="number" step="0.1" placeholder="8">
+        </div>
+      </div>
+      <div>
+        <div class="card-title">Cash Flows</div>
+        <div id="cfRows"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-ghost btn-sm" onclick="addCFRow()">+ Add Cash Flow</button>
+          <button class="btn btn-primary" onclick="calcNPV()">Calculate NPV</button>
+        </div>
+      </div>
+    </div>
+    <div id="npvResult" style="display:none">
+      <div class="result-box">
+        <div class="label">Net Present Value</div>
+        <div class="big-num" id="npvValue">—</div>
+        <div id="npvNote" style="font-size:.8rem;color:var(--muted);margin-top:4px"></div>
+      </div>
+      <div class="table-wrap" style="margin-top:12px">
+        <table id="npvTable">
+          <thead><tr><th>Year</th><th>Cash Flow</th><th>PV Factor</th><th>Present Value</th></tr></thead>
+          <tbody id="npvTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== DRAWDOWN CALCULATOR ===== -->
+<div id="tab-drawdown" class="tab-content">
+  <div class="card">
+    <div class="card-title">How Long Will My Money Last?</div>
+    <div class="calc-grid">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="form-group">
+          <label>Your Current Age</label>
+          <input class="input" id="ddCurrentAge" type="number" min="18" max="100" placeholder="50">
+        </div>
+        <div class="form-group">
+          <label>Age You Start Drawing Down</label>
+          <input class="input" id="ddStartAge" type="number" min="18" max="100" placeholder="65">
+        </div>
+        <div class="form-group">
+          <label>Portfolio Value at Drawdown (AUD)</label>
+          <input class="input" id="ddValue" type="number" placeholder="1500000">
+        </div>
+        <div class="form-group">
+          <label>Annual Drawdown Amount (AUD, today's $)</label>
+          <input class="input" id="ddAnnual" type="number" placeholder="80000">
+        </div>
+        <div class="form-group">
+          <label>Investment Growth Rate (% p.a.)</label>
+          <input class="input" id="ddGrowth" type="number" step="0.1" placeholder="7">
+        </div>
+        <div class="form-group">
+          <label>Inflation Rate (% p.a.)</label>
+          <input class="input" id="ddInflation" type="number" step="0.1" placeholder="2.5">
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="ddInflAdj" checked style="accent-color:var(--accent)">
+          Adjust drawdown for inflation each year
+        </label>
+      </div>
+      <div>
+        <div class="card-title">One-Off Additions to Savings</div>
+        <div id="addRows"></div>
+        <button class="btn btn-ghost btn-sm" onclick="addAddRow()" style="margin-bottom:16px">+ Add Lump Sum</button>
+
+        <div class="card-title" style="margin-bottom:8px">Other Annual Income (e.g. Rent, Pension)</div>
+        <div id="incomeRows"></div>
+        <button class="btn btn-ghost btn-sm" onclick="addIncomeRow()" style="margin-bottom:16px">+ Add Income Stream</button>
+
+        <button class="btn btn-primary" style="width:100%" onclick="calcDrawdown()">Calculate</button>
+      </div>
+    </div>
+
+    <div id="ddResult" style="display:none;margin-top:16px">
+      <div class="result-box">
+        <div class="label">Your Money Lasts Until</div>
+        <div class="big-num" id="ddSummary">—</div>
+        <div id="ddNote" style="font-size:.85rem;color:var(--muted);margin-top:4px"></div>
+      </div>
+
+      <div class="chart-wrap">
+        <svg id="ddChart" height="200" viewBox="0 0 600 200" preserveAspectRatio="none"></svg>
+      </div>
+
+      <div class="drawdown-table-wrap">
+        <table>
+          <thead><tr><th>Age</th><th>Year</th><th>Start Balance</th><th>Addition</th><th>Income</th><th>Growth Earned</th><th>Drawdown</th><th>End Balance</th></tr></thead>
+          <tbody id="ddTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div id="detailOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;overflow-y:auto;padding:16px" onclick="if(event.target===this)closeDetail()">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:860px;margin:0 auto;overflow:hidden">
+    <!-- Modal header -->
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span id="dTicker" style="font-size:1.3rem;font-weight:800"></span>
+          <span id="dName" style="color:var(--muted);font-size:.9rem"></span>
+          <span id="dSectorBadge" style="background:var(--surface2);border:1px solid var(--border);padding:2px 8px;border-radius:20px;font-size:.72rem;color:var(--muted)"></span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-top:6px;flex-wrap:wrap">
+          <span id="dPrice" style="font-size:1.8rem;font-weight:800"></span>
+          <span id="dChange" style="font-size:.95rem;font-weight:700"></span>
+        </div>
+      </div>
+      <button onclick="closeDetail()" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:var(--radius);padding:6px 10px;font-size:1rem;flex-shrink:0">✕</button>
+    </div>
+
+    <!-- Loading / error state -->
+    <div id="dLoading" style="padding:40px;text-align:center;color:var(--muted)">
+      <div class="spinner" style="width:24px;height:24px;border-width:3px;display:inline-block"></div>
+      <div style="margin-top:8px">Loading company data…</div>
+    </div>
+
+    <!-- Loaded content -->
+    <div id="dContent" style="display:none;padding:16px 20px">
+      <!-- Key stats grid -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px">
+        <div class="tile"><div class="tile-label">Market Cap</div><div class="tile-value" id="dMarketCap">—</div></div>
+        <div class="tile"><div class="tile-label">Shares on Issue</div><div class="tile-value" id="dShares">—</div></div>
+        <div class="tile"><div class="tile-label">P/E Ratio (TTM)</div><div class="tile-value" id="dPE">—</div></div>
+        <div class="tile"><div class="tile-label">Analyst Target</div><div class="tile-value" id="dTarget">—</div></div>
+        <div class="tile"><div class="tile-label">52W High</div><div class="tile-value" id="d52H">—</div></div>
+        <div class="tile"><div class="tile-label">52W Low</div><div class="tile-value" id="d52L">—</div></div>
+        <div class="tile"><div class="tile-label">Volume (Today)</div><div class="tile-value" id="dVol">—</div></div>
+        <div class="tile"><div class="tile-label">Open</div><div class="tile-value" id="dOpen">—</div></div>
+      </div>
+
+      <!-- Price chart -->
+      <div class="card-title" style="margin-bottom:8px">1-Year Price History</div>
+      <div class="chart-wrap" style="margin-bottom:16px">
+        <svg id="dChart" height="200" viewBox="0 0 700 200" preserveAspectRatio="none" style="min-width:320px;width:100%"></svg>
+      </div>
+
+      <!-- Description -->
+      <div id="dDescWrap" style="display:none;margin-bottom:16px">
+        <div class="card-title" style="margin-bottom:6px">About</div>
+        <p id="dDesc" style="font-size:.85rem;color:var(--muted);line-height:1.6;max-height:80px;overflow:hidden;transition:max-height .3s"></p>
+        <button id="dDescToggle" onclick="toggleDesc()" style="background:none;border:none;color:var(--accent);font-size:.8rem;cursor:pointer;padding:4px 0;margin-top:4px">Show more ▾</button>
+      </div>
+
+      <!-- Links -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a id="dAsxLink" href="#" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">🏛 ASX Company Page</a>
+        <a id="dAnnLink" href="#" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="text-decoration:none">📢 ASX Announcements</a>
+        <a id="dYahooLink" href="#" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">📊 Yahoo Finance</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+let portfolio = { watchlist: [], holdings: [] };
+let priceCache = {};
+let refreshTimer = null;
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+async function init() {
+  // Theme
+  if (localStorage.getItem('theme') === 'light') {
+    document.body.classList.add('light');
+    document.getElementById('themeToggle').textContent = '☾ Dark';
+  }
+  // Load portfolio from server
+  try {
+    const r = await fetch('/api/portfolio');
+    if (r.ok) portfolio = await r.json();
+  } catch(_) {}
+  // Seed initial CF rows for NPV
+  addCFRow(); addCFRow(); addCFRow();
+  // Refresh prices
+  await refreshAll();
+  refreshTimer = setInterval(refreshAll, 60000);
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light');
+  localStorage.setItem('theme', isLight ? 'light' : 'dark');
+  document.getElementById('themeToggle').textContent = isLight ? '☾ Dark' : '☀ Light';
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+
+// ═══════════════════════════════════════════════
+//  DATA PERSISTENCE
+// ═══════════════════════════════════════════════
+async function savePortfolio() {
+  try {
+    await fetch('/api/portfolio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(portfolio)
+    });
+  } catch(_) {}
+}
+
+// ═══════════════════════════════════════════════
+//  PRICE FETCHING
+// ═══════════════════════════════════════════════
+function setStatus(state, text) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot' + (state === 'loading' ? ' loading' : state === 'error' ? ' error' : '');
+  document.getElementById('statusText').textContent = text;
+}
+
+async function fetchQuotes(symbols) {
+  if (!symbols.length) return {};
+  const r = await fetch('/api/quote?symbols=' + symbols.join(','));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const data = await r.json();
+  const result = {};
+  const quotes = data?.quoteResponse?.result || [];
+  for (const q of quotes) {
+    result[q.symbol] = q;
+  }
+  return result;
+}
+
+async function refreshAll() {
+  const allSymbols = [...new Set([
+    ...portfolio.watchlist,
+    ...portfolio.holdings.map(h => h.symbol)
+  ])];
+  if (!allSymbols.length) {
+    setStatus('ok', 'Ready — add tickers to get started');
+    return;
+  }
+  setStatus('loading', 'Refreshing prices…');
+  try {
+    const quotes = await fetchQuotes(allSymbols);
+    Object.assign(priceCache, quotes);
+    renderWatchlist();
+    renderPortfolio();
+    const now = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+    setStatus('ok', `Prices updated at ${now} (ASX ~15–20 min delayed)`);
+  } catch(e) {
+    setStatus('error', 'Failed to fetch prices: ' + e.message);
+    renderWatchlist();
+    renderPortfolio();
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  FORMATTING HELPERS
+// ═══════════════════════════════════════════════
+const aud = v => v == null ? '—' : '$' + Math.abs(v).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const audSigned = v => v == null ? '—' : (v >= 0 ? '+$' : '-$') + Math.abs(v).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+const vol = v => v == null ? '—' : v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v.toString();
+const colorClass = v => v == null ? '' : v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu';
+const badge = v => v == null ? '' : `<span class="badge ${v >= 0 ? 'badge-pos' : 'badge-neg'}">${pct(v)}</span>`;
+
+function normaliseSymbol(s) {
+  s = s.trim().toUpperCase();
+  if (!s.endsWith('.AX')) s += '.AX';
+  return s;
+}
+
+// ═══════════════════════════════════════════════
+//  WATCHLIST
+// ═══════════════════════════════════════════════
+function addToWatchlist() {
+  const raw = document.getElementById('wlInput').value.trim();
+  if (!raw) return;
+  const sym = normaliseSymbol(raw);
+  if (portfolio.watchlist.includes(sym)) { alert(sym + ' is already in watchlist'); return; }
+  portfolio.watchlist.push(sym);
+  document.getElementById('wlInput').value = '';
+  savePortfolio();
+  refreshAll();
+}
+
+function removeFromWatchlist(sym) {
+  portfolio.watchlist = portfolio.watchlist.filter(s => s !== sym);
+  savePortfolio();
+  renderWatchlist();
+}
+
+function renderWatchlist() {
+  const tbody = document.getElementById('watchlistBody');
+  if (!portfolio.watchlist.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty"><div class="empty-icon">👁</div>Add tickers to watch them here</td></tr>';
+    return;
+  }
+  tbody.innerHTML = portfolio.watchlist.map(sym => {
+    const q = priceCache[sym];
+    const chg = q?.regularMarketChangePercent;
+    return `<tr>
+      <td><strong class="ticker-link" onclick="showDetail('${sym}')" title="View details">${sym.replace('.AX','')}</strong></td>
+      <td style="color:var(--muted);font-size:.82rem;max-width:140px;overflow:hidden;text-overflow:ellipsis">${q?.shortName || '—'}</td>
+      <td><strong>${q ? aud(q.regularMarketPrice) : '<span class="spinner"></span>'}</strong></td>
+      <td>${q ? aud(q.regularMarketOpen) : '—'}</td>
+      <td>${q ? aud(q.regularMarketDayHigh) : '—'}</td>
+      <td>${q ? aud(q.regularMarketDayLow) : '—'}</td>
+      <td>${q ? vol(q.regularMarketVolume) : '—'}</td>
+      <td>${badge(chg)}</td>
+      <td><button class="btn btn-danger" onclick="removeFromWatchlist('${sym}')">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+//  PORTFOLIO
+// ═══════════════════════════════════════════════
+function addHolding() {
+  const sym = normaliseSymbol(document.getElementById('phSymbol').value || '');
+  const qty = parseFloat(document.getElementById('phQty').value);
+  const buyPrice = parseFloat(document.getElementById('phBuy').value);
+  const targetPrice = parseFloat(document.getElementById('phTarget').value) || null;
+  if (!sym || isNaN(qty) || isNaN(buyPrice)) { alert('Please fill in Symbol, Quantity and Buy Price'); return; }
+  const existing = portfolio.holdings.find(h => h.symbol === sym);
+  if (existing) { alert(sym + ' already in portfolio — edit it in the table'); return; }
+  portfolio.holdings.push({ symbol: sym, qty, buyPrice, targetPrice });
+  document.getElementById('phSymbol').value = '';
+  document.getElementById('phQty').value = '';
+  document.getElementById('phBuy').value = '';
+  document.getElementById('phTarget').value = '';
+  savePortfolio();
+  refreshAll();
+}
+
+function removeHolding(sym) {
+  portfolio.holdings = portfolio.holdings.filter(h => h.symbol !== sym);
+  savePortfolio();
+  renderPortfolio();
+}
+
+function updateTarget(sym, val) {
+  const h = portfolio.holdings.find(h => h.symbol === sym);
+  if (h) { h.targetPrice = parseFloat(val) || null; savePortfolio(); renderPortfolio(); }
+}
+
+function renderPortfolio() {
+  const tbody = document.getElementById('portfolioBody');
+  const tfoot = document.getElementById('portfolioFoot');
+  const tiles = document.getElementById('portfolioTiles');
+
+  if (!portfolio.holdings.length) {
+    tbody.innerHTML = '<tr><td colspan="12" class="empty"><div class="empty-icon">📈</div>Add your holdings above</td></tr>';
+    tfoot.style.display = 'none';
+    tiles.style.display = 'none';
+    return;
+  }
+
+  let totalBook = 0, totalCurrent = 0, totalTarget = 0, totalDayChange = 0;
+
+  tbody.innerHTML = portfolio.holdings.map(h => {
+    const q = priceCache[h.symbol];
+    const currPrice = q?.regularMarketPrice;
+    const prevClose = q?.regularMarketPreviousClose;
+    const dayChgPct = q?.regularMarketChangePercent;
+    const bookVal = h.qty * h.buyPrice;
+    const currVal = currPrice != null ? h.qty * currPrice : null;
+    const pnlDollar = currVal != null ? currVal - bookVal : null;
+    const pnlPct = pnlDollar != null ? (pnlDollar / bookVal) * 100 : null;
+    const targetVal = h.targetPrice ? h.qty * h.targetPrice : null;
+    const dayDollar = (currPrice != null && prevClose != null) ? h.qty * (currPrice - prevClose) : null;
+
+    if (currVal != null) { totalBook += bookVal; totalCurrent += currVal; }
+    if (dayDollar != null) totalDayChange += dayDollar;
+    if (targetVal != null) totalTarget += targetVal;
+
+    return `<tr>
+      <td><strong class="ticker-link" onclick="showDetail('${h.symbol}')" title="View details">${h.symbol.replace('.AX','')}</strong></td>
+      <td>${h.qty.toLocaleString()}</td>
+      <td>${aud(h.buyPrice)}</td>
+      <td>${currPrice != null ? aud(currPrice) : '<span class="spinner"></span>'}</td>
+      <td>${aud(bookVal)}</td>
+      <td>${currVal != null ? aud(currVal) : '—'}</td>
+      <td class="${colorClass(pnlDollar)}">${audSigned(pnlDollar)}</td>
+      <td>${badge(pnlPct)}</td>
+      <td>${badge(dayChgPct)}</td>
+      <td class="editable-cell"><input type="number" step="0.001" value="${h.targetPrice || ''}" placeholder="—" onchange="updateTarget('${h.symbol}',this.value)" style="width:72px"></td>
+      <td>${targetVal != null ? aud(targetVal) : '—'}</td>
+      <td><button class="btn btn-danger" onclick="removeHolding('${h.symbol}')">✕</button></td>
+    </tr>`;
+  }).join('');
+
+  // Totals footer
+  const totalPnl = totalCurrent - totalBook;
+  const totalPnlPct = totalBook ? (totalPnl / totalBook) * 100 : 0;
+  tfoot.style.display = '';
+  tfoot.innerHTML = `<tr class="tfoot-row">
+    <td colspan="4"><strong>TOTAL</strong></td>
+    <td>${aud(totalBook)}</td>
+    <td>${aud(totalCurrent)}</td>
+    <td class="${colorClass(totalPnl)}">${audSigned(totalPnl)}</td>
+    <td>${badge(totalPnlPct)}</td>
+    <td class="${colorClass(totalDayChange)}">${audSigned(totalDayChange)}</td>
+    <td></td>
+    <td>${totalTarget ? aud(totalTarget) : '—'}</td>
+    <td></td>
+  </tr>`;
+
+  // Tiles
+  tiles.style.display = 'grid';
+  document.getElementById('tileBook').textContent = aud(totalBook);
+  document.getElementById('tileCurrent').textContent = aud(totalCurrent);
+  const pnlEl = document.getElementById('tilePnl');
+  pnlEl.textContent = audSigned(totalPnl);
+  pnlEl.className = 'tile-value ' + colorClass(totalPnl);
+  document.getElementById('tilePnlPct').textContent = pct(totalPnlPct);
+  const dayEl = document.getElementById('tileDay');
+  dayEl.textContent = audSigned(totalDayChange);
+  dayEl.className = 'tile-value ' + colorClass(totalDayChange);
+  document.getElementById('tileTarget').textContent = totalTarget ? aud(totalTarget) : '—';
+  if (totalTarget && totalCurrent) {
+    const g = totalTarget - totalCurrent;
+    const ge = document.getElementById('tileTargetGain');
+    ge.textContent = audSigned(g) + ' (' + pct((g/totalCurrent)*100) + ')';
+    ge.className = 'tile-sub ' + colorClass(g);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  NPV CALCULATOR
+// ═══════════════════════════════════════════════
+let cfCount = 0;
+
+function addCFRow() {
+  if (cfCount >= 15) return;
+  cfCount++;
+  const id = cfCount;
+  const div = document.createElement('div');
+  div.className = 'cf-row';
+  div.id = 'cfrow-' + id;
+  div.innerHTML = `
+    <span style="font-size:.78rem;color:var(--muted);min-width:48px">Year ${id}</span>
+    <input class="input" type="number" id="cf-${id}" placeholder="Cash flow (AUD)" step="0.01">
+    <button class="btn btn-danger" onclick="removeCFRow(${id})" style="flex-shrink:0">✕</button>`;
+  document.getElementById('cfRows').appendChild(div);
+}
+
+function removeCFRow(id) {
+  const el = document.getElementById('cfrow-' + id);
+  if (el) el.remove();
+}
+
+function calcNPV() {
+  const initial = parseFloat(document.getElementById('npvInitial').value);
+  const rate = parseFloat(document.getElementById('npvRate').value) / 100;
+  if (isNaN(initial) || isNaN(rate)) { alert('Please enter Initial Investment and Discount Rate'); return; }
+
+  let npv = -initial;
+  const rows = [];
+  rows.push({ year: 0, cf: -initial, pvf: 1, pv: -initial });
+
+  for (let i = 1; i <= 15; i++) {
+    const input = document.getElementById('cf-' + i);
+    if (!input) continue;
+    const cf = parseFloat(input.value);
+    if (isNaN(cf)) continue;
+    const pvf = 1 / Math.pow(1 + rate, i);
+    const pv = cf * pvf;
+    npv += pv;
+    rows.push({ year: i, cf, pvf, pv });
+  }
+
+  document.getElementById('npvResult').style.display = '';
+  const valEl = document.getElementById('npvValue');
+  valEl.textContent = (npv >= 0 ? '+' : '-') + aud(Math.abs(npv));
+  valEl.className = 'big-num ' + colorClass(npv);
+  document.getElementById('npvNote').textContent = npv >= 0 ? 'Positive NPV — project adds value at this discount rate' : 'Negative NPV — project destroys value at this discount rate';
+
+  document.getElementById('npvTableBody').innerHTML = rows.map(r =>
+    `<tr>
+      <td>${r.year === 0 ? 'Now' : r.year}</td>
+      <td class="${colorClass(r.cf)}">${audSigned(r.cf)}</td>
+      <td>${r.pvf.toFixed(4)}</td>
+      <td class="${colorClass(r.pv)}">${audSigned(r.pv)}</td>
+    </tr>`
+  ).join('');
+}
+
+// ═══════════════════════════════════════════════
+//  DRAWDOWN CALCULATOR
+// ═══════════════════════════════════════════════
+let addCount = 0;
+let incomeCount = 0;
+
+function addAddRow() {
+  addCount++;
+  const id = addCount;
+  const div = document.createElement('div');
+  div.className = 'add-row';
+  div.id = 'addrow-' + id;
+  div.innerHTML = `
+    <input class="input" type="number" id="add-yr-${id}" placeholder="Year (e.g. 2030)" style="max-width:110px">
+    <input class="input" type="number" id="add-amt-${id}" placeholder="Amount (AUD)">
+    <button class="btn btn-danger" onclick="document.getElementById('addrow-${id}').remove()" style="flex-shrink:0">✕</button>`;
+  document.getElementById('addRows').appendChild(div);
+}
+
+function addIncomeRow() {
+  incomeCount++;
+  const id = incomeCount;
+  const div = document.createElement('div');
+  div.id = 'incrow-' + id;
+  div.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:8px';
+  div.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <input class="input" id="inc-name-${id}" placeholder="e.g. Rental income" style="flex:2">
+      <button class="btn btn-danger" onclick="document.getElementById('incrow-${id}').remove()" style="flex-shrink:0">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+      <div>
+        <div style="font-size:.7rem;color:var(--muted);margin-bottom:3px">Annual Amount (AUD)</div>
+        <input class="input" type="number" id="inc-amt-${id}" placeholder="30000">
+      </div>
+      <div>
+        <div style="font-size:.7rem;color:var(--muted);margin-bottom:3px">Growth Rate (% p.a.)</div>
+        <input class="input" type="number" id="inc-growth-${id}" placeholder="0" step="0.1" value="0">
+      </div>
+      <div>
+        <div style="font-size:.7rem;color:var(--muted);margin-bottom:3px">Starts at age</div>
+        <input class="input" type="number" id="inc-start-${id}" placeholder="65">
+      </div>
+      <div>
+        <div style="font-size:.7rem;color:var(--muted);margin-bottom:3px">Ends at age (blank = forever)</div>
+        <input class="input" type="number" id="inc-end-${id}" placeholder="—">
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:7px;font-size:.8rem;cursor:pointer">
+      <input type="checkbox" id="inc-real-${id}" style="accent-color:var(--accent)">
+      Growth is real (net of inflation) — i.e. income keeps pace with inflation <em>plus</em> this rate
+    </label>`;
+  document.getElementById('incomeRows').appendChild(div);
+}
+
+function calcDrawdown() {
+  const currentAge = parseInt(document.getElementById('ddCurrentAge').value);
+  const startAge = parseInt(document.getElementById('ddStartAge').value);
+  const startValue = parseFloat(document.getElementById('ddValue').value);
+  const annualDrawdown = parseFloat(document.getElementById('ddAnnual').value);
+  const growthRate = parseFloat(document.getElementById('ddGrowth').value) / 100;
+  const inflationRate = parseFloat(document.getElementById('ddInflation').value) / 100;
+  const inflAdj = document.getElementById('ddInflAdj').checked;
+
+  if ([currentAge, startAge, startValue, annualDrawdown, growthRate, inflationRate].some(isNaN)) {
+    alert('Please fill in all fields'); return;
+  }
+  if (startAge <= currentAge) { alert('Drawdown age must be greater than current age'); return; }
+
+  // Build lump-sum additions map: { year -> amount }
+  const additions = {};
+  for (let i = 1; i <= addCount; i++) {
+    const yrEl = document.getElementById('add-yr-' + i);
+    const amtEl = document.getElementById('add-amt-' + i);
+    if (!yrEl) continue;
+    const yr = parseInt(yrEl.value);
+    const amt = parseFloat(amtEl.value);
+    if (!isNaN(yr) && !isNaN(amt) && amt > 0) {
+      additions[yr] = (additions[yr] || 0) + amt;
+    }
+  }
+
+  // Collect income streams — make a live copy with currentAmount for simulation
+  const streams = [];
+  for (let i = 1; i <= incomeCount; i++) {
+    const nameEl = document.getElementById('inc-name-' + i);
+    if (!nameEl) continue;
+    const amt = parseFloat(document.getElementById('inc-amt-' + i).value);
+    if (isNaN(amt) || amt <= 0) continue;
+    const rawStart = parseInt(document.getElementById('inc-start-' + i).value);
+    const rawEnd   = parseInt(document.getElementById('inc-end-' + i).value);
+    const growth   = (parseFloat(document.getElementById('inc-growth-' + i).value) || 0) / 100;
+    const isReal   = document.getElementById('inc-real-' + i).checked;
+    // Nominal growth rate: if real, add inflation on top
+    const nominalGrowth = isReal ? growth + inflationRate : growth;
+    streams.push({
+      name: nameEl.value || 'Income',
+      startAge: isNaN(rawStart) ? startAge : rawStart,
+      endAge: isNaN(rawEnd) ? 999 : rawEnd,
+      nominalGrowth,
+      currentAmount: amt,
+    });
+  }
+
+  const currentYear = new Date().getFullYear();
+  const drawdownYear = currentYear + (startAge - currentAge);
+  const rows = [];
+  let balance = startValue;
+  let drawdown = annualDrawdown;
+  let ranOut = null;
+
+  for (let age = startAge; age <= 120; age++) {
+    const year = drawdownYear + (age - startAge);
+    const addition = additions[year] || 0;
+
+    // Sum active income streams this year
+    let incomeThisYear = 0;
+    for (const s of streams) {
+      if (age >= s.startAge && age <= s.endAge) incomeThisYear += s.currentAmount;
+    }
+
+    const startBal = balance + addition + incomeThisYear;
+    const growth = startBal * growthRate;
+    const endBal = startBal + growth - drawdown;
+
+    rows.push({ age, year, startBal, addition, income: incomeThisYear, growth, drawdown, endBal: Math.max(endBal, 0) });
+    balance = endBal;
+    if (balance <= 0) { ranOut = { age, year }; break; }
+
+    // Advance drawdown and income for next year
+    if (inflAdj) drawdown *= (1 + inflationRate);
+    for (const s of streams) s.currentAmount *= (1 + s.nominalGrowth);
+  }
+
+  const hasIncome = streams.length > 0;
+
+  // Summary
+  const summaryEl = document.getElementById('ddSummary');
+  const noteEl = document.getElementById('ddNote');
+  if (ranOut) {
+    summaryEl.textContent = `Age ${ranOut.age} (${ranOut.year})`;
+    summaryEl.className = 'big-num neg';
+    const yearsLast = ranOut.age - startAge;
+    const incomePart = hasIncome ? ` Additional income streams included.` : '';
+    noteEl.textContent = `${yearsLast} year${yearsLast !== 1 ? 's' : ''} of drawdown. Net annual spend: ${aud(annualDrawdown)}.${incomePart}`;
+  } else {
+    summaryEl.textContent = 'Never runs out ✓';
+    summaryEl.className = 'big-num pos';
+    const incomePart = hasIncome ? ` Income streams boost longevity.` : '';
+    noteEl.textContent = `Portfolio sustains ${aud(annualDrawdown)}/yr net spend indefinitely.${incomePart}`;
+  }
+
+  // Table
+  document.getElementById('ddTableBody').innerHTML = rows.map(r =>
+    `<tr>
+      <td>${r.age}</td>
+      <td>${r.year}</td>
+      <td>${aud(r.startBal - r.addition - r.income)}</td>
+      <td>${r.addition ? '<span class="pos">+' + aud(r.addition) + '</span>' : '—'}</td>
+      <td>${r.income > 0 ? '<span class="pos">+' + aud(r.income) + '</span>' : '—'}</td>
+      <td class="pos">+${aud(r.growth)}</td>
+      <td class="neg">-${aud(r.drawdown)}</td>
+      <td class="${r.endBal <= 0 ? 'neg' : r.endBal < annualDrawdown * 3 ? '' : 'pos'}">${aud(r.endBal)}</td>
+    </tr>`
+  ).join('');
+
+  // Chart
+  drawChart(rows);
+  document.getElementById('ddResult').style.display = '';
+}
+
+function drawChart(rows) {
+  if (!rows.length) return;
+  const svg = document.getElementById('ddChart');
+  const W = 600, H = 200, PAD = { top: 10, right: 10, bottom: 30, left: 60 };
+  const innerW = W - PAD.left - PAD.right;
+  const innerH = H - PAD.top - PAD.bottom;
+  const maxBal = Math.max(...rows.map(r => r.startBal));
+  const minAge = rows[0].age;
+  const maxAge = rows[rows.length - 1].age;
+  const xScale = age => PAD.left + ((age - minAge) / Math.max(1, maxAge - minAge)) * innerW;
+  const yScale = val => PAD.top + innerH - (val / maxBal) * innerH;
+
+  // Axes
+  const xAxis = `<line x1="${PAD.left}" y1="${PAD.top + innerH}" x2="${PAD.left + innerW}" y2="${PAD.top + innerH}" stroke="var(--border)" stroke-width="1"/>`;
+  const yAxis = `<line x1="${PAD.left}" y1="${PAD.top}" x2="${PAD.left}" y2="${PAD.top + innerH}" stroke="var(--border)" stroke-width="1"/>`;
+
+  // Y labels
+  const yLabels = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const v = maxBal * f;
+    const y = yScale(v);
+    return `<text x="${PAD.left - 5}" y="${y + 4}" text-anchor="end" fill="var(--muted)" font-size="9">${v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v.toFixed(0)}</text>
+    <line x1="${PAD.left}" y1="${y}" x2="${PAD.left + innerW}" y2="${y}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3,3"/>`;
+  }).join('');
+
+  // X labels: show every 5 years
+  const step = Math.ceil((maxAge - minAge) / 8 / 5) * 5 || 5;
+  const xLabels = [];
+  for (let age = minAge; age <= maxAge; age += step) {
+    const x = xScale(age);
+    xLabels.push(`<text x="${x}" y="${PAD.top + innerH + 16}" text-anchor="middle" fill="var(--muted)" font-size="9">${age}</text>`);
+  }
+
+  // Line
+  const points = rows.map(r => `${xScale(r.age)},${yScale(r.endBal)}`).join(' ');
+  // Fill area under line
+  const fillPoints = `${xScale(rows[0].age)},${yScale(0)} ` + rows.map(r => `${xScale(r.age)},${yScale(r.endBal)}`).join(' ') + ` ${xScale(rows[rows.length-1].age)},${yScale(0)}`;
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = `
+    ${xAxis}${yAxis}${yLabels}${xLabels.join('')}
+    <polygon points="${fillPoints}" fill="var(--accent)" opacity="0.1"/>
+    <polyline points="${points}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+  `;
+}
+
+// ═══════════════════════════════════════════════
+//  STOCK DETAIL MODAL
+// ═══════════════════════════════════════════════
+let descExpanded = false;
+
+function searchAndShow() {
+  const raw = document.getElementById('globalSearch').value.trim();
+  if (!raw) return;
+  const sym = normaliseSymbol(raw);
+  document.getElementById('globalSearch').value = '';
+  showDetail(sym);
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function toggleDesc() {
+  const p = document.getElementById('dDesc');
+  const btn = document.getElementById('dDescToggle');
+  descExpanded = !descExpanded;
+  p.style.maxHeight = descExpanded ? '1000px' : '80px';
+  btn.textContent = descExpanded ? 'Show less ▴' : 'Show more ▾';
+}
+
+async function showDetail(symbol) {
+  descExpanded = false;
+  const overlay = document.getElementById('detailOverlay');
+  overlay.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+
+  // Reset
+  document.getElementById('dLoading').style.display = 'block';
+  document.getElementById('dContent').style.display = 'none';
+  document.getElementById('dTicker').textContent = symbol.replace('.AX', '');
+  document.getElementById('dName').textContent = '';
+  document.getElementById('dPrice').textContent = '';
+  document.getElementById('dChange').textContent = '';
+
+  try {
+    const r = await fetch(`/api/detail?symbol=${encodeURIComponent(symbol)}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    renderDetail(d, symbol);
+  } catch(e) {
+    document.getElementById('dLoading').innerHTML = `<div style="color:var(--red);padding:40px;text-align:center">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function fmtBig(n) {
+  if (n == null) return '—';
+  if (n >= 1e12) return '$' + (n/1e12).toFixed(2) + 'T';
+  if (n >= 1e9)  return '$' + (n/1e9).toFixed(2) + 'B';
+  if (n >= 1e6)  return '$' + (n/1e6).toFixed(2) + 'M';
+  return '$' + n.toLocaleString('en-AU');
+}
+
+function fmtShares(n) {
+  if (n == null) return '—';
+  if (n >= 1e9) return (n/1e9).toFixed(3) + 'B';
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  return n.toLocaleString('en-AU');
+}
+
+function renderDetail(d, symbol) {
+  const ticker = symbol.replace('.AX', '');
+  document.getElementById('dLoading').style.display = 'none';
+  document.getElementById('dContent').style.display = 'block';
+
+  document.getElementById('dTicker').textContent = ticker;
+  document.getElementById('dName').textContent = d.shortName || '';
+  document.getElementById('dSectorBadge').textContent = [d.sector, d.industry].filter(Boolean).join(' · ') || '';
+
+  const price = d.regularMarketPrice;
+  const chg = d.regularMarketChange;
+  const chgPct = d.regularMarketChangePercent;
+  document.getElementById('dPrice').textContent = price != null ? `$${price.toFixed(2)}` : '—';
+  const changeEl = document.getElementById('dChange');
+  changeEl.textContent = (chg != null && chgPct != null) ? `${chg >= 0 ? '+' : ''}$${chg.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)` : '';
+  changeEl.className = chg >= 0 ? 'pos' : 'neg';
+
+  document.getElementById('dMarketCap').textContent = d.marketCapStr || fmtBig(d.marketCap);
+  document.getElementById('dShares').textContent = fmtShares(d.sharesOutstanding);
+  document.getElementById('dPE').textContent = d.trailingPE != null ? d.trailingPE.toFixed(1) + 'x' : '—';
+  document.getElementById('dTarget').textContent = d.targetMeanPrice != null ? `$${d.targetMeanPrice.toFixed(2)}` : '—';
+  document.getElementById('d52H').textContent = d.fiftyTwoWeekHigh != null ? `$${d.fiftyTwoWeekHigh.toFixed(2)}` : '—';
+  document.getElementById('d52L').textContent = d.fiftyTwoWeekLow != null ? `$${d.fiftyTwoWeekLow.toFixed(2)}` : '—';
+  document.getElementById('dVol').textContent = vol(d.regularMarketVolume);
+  document.getElementById('dOpen').textContent = d.regularMarketOpen != null ? `$${d.regularMarketOpen.toFixed(2)}` : '—';
+
+  const descWrap = document.getElementById('dDescWrap');
+  const descEl = document.getElementById('dDesc');
+  const descToggle = document.getElementById('dDescToggle');
+  if (d.description) {
+    descWrap.style.display = '';
+    descEl.textContent = d.description;
+    descEl.style.maxHeight = '80px';
+    descToggle.textContent = 'Show more ▾';
+  } else {
+    descWrap.style.display = 'none';
+  }
+
+  // Links
+  document.getElementById('dAsxLink').href = `https://www.asx.com.au/markets/company/${ticker}.html`;
+  document.getElementById('dAnnLink').href = `https://www.asx.com.au/markets/company/${ticker}/announcements`;
+  document.getElementById('dYahooLink').href = `https://finance.yahoo.com/quote/${symbol}/`;
+
+  // Historical chart
+  if (d.history && d.history.length) drawDetailChart(d.history, d.regularMarketPrice);
+}
+
+function drawDetailChart(history, currentPrice) {
+  const svg = document.getElementById('dChart');
+  const W = 700, H = 200;
+  const PAD = { top: 15, right: 15, bottom: 28, left: 55 };
+  const iW = W - PAD.left - PAD.right;
+  const iH = H - PAD.top - PAD.bottom;
+
+  const closes = history.map(r => r.close);
+  const minV = Math.min(...closes) * 0.995;
+  const maxV = Math.max(...closes) * 1.005;
+  const xS = i => PAD.left + (i / (history.length - 1)) * iW;
+  const yS = v => PAD.top + iH - ((v - minV) / (maxV - minV)) * iH;
+
+  // Axes
+  const xAxis = `<line x1="${PAD.left}" y1="${PAD.top+iH}" x2="${PAD.left+iW}" y2="${PAD.top+iH}" stroke="var(--border)" stroke-width="1"/>`;
+  const yAxis = `<line x1="${PAD.left}" y1="${PAD.top}" x2="${PAD.left}" y2="${PAD.top+iH}" stroke="var(--border)" stroke-width="1"/>`;
+
+  // Y gridlines + labels
+  const ySteps = 5;
+  const yLabels = Array.from({length: ySteps+1}, (_,i) => {
+    const v = minV + (maxV - minV) * (i / ySteps);
+    const y = yS(v);
+    return `<text x="${PAD.left-5}" y="${y+4}" text-anchor="end" fill="var(--muted)" font-size="9">$${v.toFixed(2)}</text>
+    <line x1="${PAD.left}" y1="${y}" x2="${PAD.left+iW}" y2="${y}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3,3"/>`;
+  }).join('');
+
+  // X labels — show month names
+  const xLabels = [];
+  let lastMonth = -1;
+  history.forEach((r, i) => {
+    const m = new Date(r.date).getMonth();
+    if (m !== lastMonth) {
+      lastMonth = m;
+      const x = xS(i);
+      const lbl = new Date(r.date).toLocaleDateString('en-AU', { month: 'short' });
+      xLabels.push(`<text x="${x}" y="${PAD.top+iH+16}" text-anchor="middle" fill="var(--muted)" font-size="9">${lbl}</text>`);
+    }
+  });
+
+  // Line and fill
+  const pts = history.map((r,i) => `${xS(i).toFixed(1)},${yS(r.close).toFixed(1)}`).join(' ');
+  const fillPts = `${xS(0)},${(PAD.top+iH).toFixed(1)} ${pts} ${xS(history.length-1)},${(PAD.top+iH).toFixed(1)}`;
+  const lineColor = closes[closes.length-1] >= closes[0] ? 'var(--green)' : 'var(--red)';
+  const fillColor = closes[closes.length-1] >= closes[0] ? 'rgba(52,211,153,.1)' : 'rgba(248,113,113,.1)';
+
+  // Current price line
+  const currY = yS(currentPrice).toFixed(1);
+  const priceLineSvg = `<line x1="${PAD.left}" y1="${currY}" x2="${PAD.left+iW}" y2="${currY}" stroke="${lineColor}" stroke-width="0.8" stroke-dasharray="4,4" opacity="0.6"/>
+  <text x="${PAD.left+iW+3}" y="${parseFloat(currY)+4}" fill="${lineColor}" font-size="8">now</text>`;
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = `${xAxis}${yAxis}${yLabels}${xLabels.join('')}
+    <polygon points="${fillPts}" fill="${fillColor}"/>
+    <polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="1.8" stroke-linejoin="round"/>
+    ${priceLineSvg}`;
+}
+
+// ═══════════════════════════════════════════════
+//  BOOTSTRAP
+// ═══════════════════════════════════════════════
+init();
+</script>
+</body>
+</html>
