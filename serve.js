@@ -169,6 +169,53 @@ function getAuthStatus() {
   };
 }
 
+// ── Supabase REST helpers ─────────────────────────────────────────────────────
+function supabaseRequest(method, path, body, cfg) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(cfg.supabaseUrl);
+    const postData = body ? JSON.stringify(body) : null;
+    const opts = {
+      hostname: u.hostname,
+      path: `/rest/v1/${path}`,
+      port: 443,
+      method,
+      headers: {
+        'apikey': cfg.supabaseKey,
+        'Authorization': `Bearer ${cfg.supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(method === 'POST' ? { 'Prefer': 'resolution=merge-duplicates,return=minimal' } : {}),
+        ...(postData ? { 'Content-Length': Buffer.byteLength(postData) } : {}),
+      }
+    };
+    const r = https.request(opts, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    r.on('error', reject);
+    if (postData) r.write(postData);
+    r.end();
+  });
+}
+
+async function supabaseGetPortfolio(cfg) {
+  const r = await supabaseRequest('GET', 'portfolio?key=eq.main&select=data', null, cfg);
+  if (r.status !== 200) throw new Error(`Supabase GET ${r.status}: ${r.body}`);
+  const rows = JSON.parse(r.body);
+  return rows.length ? rows[0].data : { watchlist: [], holdings: [] };
+}
+
+async function supabaseSavePortfolio(data, cfg) {
+  const r = await supabaseRequest('POST', 'portfolio', {
+    key: 'main',
+    data,
+    updated_at: new Date().toISOString()
+  }, cfg);
+  if (r.status >= 300) throw new Error(`Supabase POST ${r.status}: ${r.body}`);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ── Yahoo Finance chart API (no auth required) ───────────────────────────────
 const YH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -474,7 +521,21 @@ ACTIONS_JSON:
 
   // GET /api/portfolio
   if (req.method === 'GET' && url === '/api/portfolio') {
+    const cfg = loadConfig();
     const portfolioPath = path.join(root, 'portfolio.json');
+    // Try Supabase first, fall back to local file
+    if (cfg.supabaseUrl && cfg.supabaseKey) {
+      try {
+        const data = await supabaseGetPortfolio(cfg);
+        // Keep local file in sync
+        fs.writeFileSync(portfolioPath, JSON.stringify(data), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+        return;
+      } catch(e) {
+        console.warn('Supabase read failed, falling back to local:', e.message);
+      }
+    }
     try {
       const data = JSON.parse(fs.readFileSync(portfolioPath, 'utf8'));
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -490,7 +551,16 @@ ACTIONS_JSON:
   if (req.method === 'POST' && url === '/api/portfolio') {
     try {
       const body = await readBody(req);
+      const data = JSON.parse(body);
+      const cfg = loadConfig();
+      // Save to local file always (fast, offline backup)
       fs.writeFileSync(path.join(root, 'portfolio.json'), body, 'utf8');
+      // Save to Supabase (async, don't block the response)
+      if (cfg.supabaseUrl && cfg.supabaseKey) {
+        supabaseSavePortfolio(data, cfg).catch(e =>
+          console.warn('Supabase write failed:', e.message)
+        );
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     } catch(e) {
