@@ -674,9 +674,14 @@ function removeHolding(sym) {
   renderPortfolio();
 }
 
-function updateTarget(sym, val) {
+function updateHolding(sym, field, val) {
   const h = portfolio.holdings.find(h => h.symbol === sym);
-  if (h) { h.targetPrice = parseFloat(val) || null; savePortfolio(); renderPortfolio(); }
+  if (!h) return;
+  if (field === 'qty') h.qty = parseFloat(val) || h.qty;
+  else if (field === 'buyPrice') h.buyPrice = parseFloat(val) || h.buyPrice;
+  else if (field === 'targetPrice') h.targetPrice = parseFloat(val) || null;
+  savePortfolio();
+  renderPortfolio();
 }
 
 function renderPortfolio() {
@@ -711,15 +716,15 @@ function renderPortfolio() {
 
     return `<tr>
       <td><strong class="ticker-link" onclick="showDetail('${h.symbol}')" title="View details">${h.symbol.replace('.AX','')}</strong></td>
-      <td>${h.qty.toLocaleString()}</td>
-      <td>${aud(h.buyPrice)}</td>
+      <td class="editable-cell"><input type="number" step="1" value="${h.qty}" onchange="updateHolding('${h.symbol}','qty',this.value)" style="width:72px"></td>
+      <td class="editable-cell"><input type="number" step="0.001" value="${h.buyPrice}" onchange="updateHolding('${h.symbol}','buyPrice',this.value)" style="width:72px"></td>
       <td>${currPrice != null ? aud(currPrice) : '<span class="spinner"></span>'}</td>
       <td>${aud(bookVal)}</td>
       <td>${currVal != null ? aud(currVal) : '—'}</td>
       <td class="${colorClass(pnlDollar)}">${audSigned(pnlDollar)}</td>
       <td>${badge(pnlPct)}</td>
       <td>${badge(dayChgPct)}</td>
-      <td class="editable-cell"><input type="number" step="0.001" value="${h.targetPrice || ''}" placeholder="—" onchange="updateTarget('${h.symbol}',this.value)" style="width:72px"></td>
+      <td class="editable-cell"><input type="number" step="0.001" value="${h.targetPrice || ''}" placeholder="—" onchange="updateHolding('${h.symbol}','targetPrice',this.value)" style="width:72px"></td>
       <td>${targetVal != null ? aud(targetVal) : '—'}</td>
       <td><button class="btn btn-danger" onclick="removeHolding('${h.symbol}')">✕</button></td>
     </tr>`;
