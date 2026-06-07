@@ -681,6 +681,7 @@ function addToWatchlist() {
   if (portfolio.watchlist.includes(sym)) { alert(sym + ' is already in watchlist'); return; }
   portfolio.watchlist.push(sym);
   document.getElementById('wlInput').value = '';
+  renderWatchlist();   // show row immediately with spinner
   savePortfolio();
   refreshAll();
 }
@@ -730,6 +731,7 @@ function addHolding() {
   document.getElementById('phQty').value = '';
   document.getElementById('phBuy').value = '';
   document.getElementById('phTarget').value = '';
+  renderPortfolio();   // show row immediately with spinner
   savePortfolio();
   refreshAll();
 }
