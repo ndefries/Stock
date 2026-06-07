@@ -320,8 +320,25 @@ tbody tr:hover{background:var(--surface2)}
           <input class="input" id="ddValue" type="number" placeholder="1500000">
         </div>
         <div class="form-group">
-          <label>Annual Drawdown Amount (AUD, today's $)</label>
+          <label>Withdrawal Type</label>
+          <div style="display:flex;gap:8px;margin-top:2px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer;flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px" id="ddTypeDollarLabel">
+              <input type="radio" name="ddType" id="ddTypeDollar" value="dollar" checked style="accent-color:var(--accent)" onchange="ddTypeChange()">
+              Fixed $ amount
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer;flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px" id="ddTypePctLabel">
+              <input type="radio" name="ddType" id="ddTypePct" value="pct" style="accent-color:var(--accent)" onchange="ddTypeChange()">
+              % of balance
+            </label>
+          </div>
+        </div>
+        <div class="form-group" id="ddAnnualGroup">
+          <label>Annual Withdrawal Amount (AUD, today's $)</label>
           <input class="input" id="ddAnnual" type="number" placeholder="80000">
+        </div>
+        <div class="form-group" id="ddPctGroup" style="display:none">
+          <label>Annual Withdrawal (% of portfolio balance)</label>
+          <input class="input" id="ddPct" type="number" step="0.1" placeholder="4" min="0.1" max="100">
         </div>
         <div class="form-group">
           <label>Investment Growth Rate (% p.a.)</label>
@@ -331,9 +348,9 @@ tbody tr:hover{background:var(--surface2)}
           <label>Inflation Rate (% p.a.)</label>
           <input class="input" id="ddInflation" type="number" step="0.1" placeholder="2.5">
         </div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
+        <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer" id="ddInflAdjLabel">
           <input type="checkbox" id="ddInflAdj" checked style="accent-color:var(--accent)">
-          Adjust drawdown for inflation each year
+          Adjust withdrawal for inflation each year
         </label>
       </div>
       <div>
@@ -898,6 +915,13 @@ function calcNPV() {
 //  DRAWDOWN CALCULATOR
 // ═══════════════════════════════════════════════
 let addCount = 0;
+
+function ddTypeChange() {
+  const isPct = document.getElementById('ddTypePct').checked;
+  document.getElementById('ddAnnualGroup').style.display = isPct ? 'none' : '';
+  document.getElementById('ddPctGroup').style.display   = isPct ? '' : 'none';
+  document.getElementById('ddInflAdjLabel').style.display = isPct ? 'none' : '';
+}
 let incomeCount = 0;
 
 function addAddRow() {
@@ -950,33 +974,34 @@ function addIncomeRow() {
 }
 
 function calcDrawdown() {
-  const currentAge = parseInt(document.getElementById('ddCurrentAge').value);
-  const startAge = parseInt(document.getElementById('ddStartAge').value);
-  const startValue = parseFloat(document.getElementById('ddValue').value);
-  const annualDrawdown = parseFloat(document.getElementById('ddAnnual').value);
-  const growthRate = parseFloat(document.getElementById('ddGrowth').value) / 100;
+  const currentAge  = parseInt(document.getElementById('ddCurrentAge').value);
+  const startAge    = parseInt(document.getElementById('ddStartAge').value);
+  const startValue  = parseFloat(document.getElementById('ddValue').value);
+  const growthRate  = parseFloat(document.getElementById('ddGrowth').value) / 100;
   const inflationRate = parseFloat(document.getElementById('ddInflation').value) / 100;
-  const inflAdj = document.getElementById('ddInflAdj').checked;
+  const isPct       = document.getElementById('ddTypePct').checked;
+  const inflAdj     = !isPct && document.getElementById('ddInflAdj').checked;
 
-  if ([currentAge, startAge, startValue, annualDrawdown, growthRate, inflationRate].some(isNaN)) {
-    alert('Please fill in all fields'); return;
-  }
+  // Mode-specific input
+  const annualDrawdown = isPct ? null : parseFloat(document.getElementById('ddAnnual').value);
+  const drawdownPct    = isPct ? parseFloat(document.getElementById('ddPct').value) / 100 : null;
+
+  const modeCheck = isPct ? [currentAge, startAge, startValue, drawdownPct, growthRate, inflationRate]
+                           : [currentAge, startAge, startValue, annualDrawdown, growthRate, inflationRate];
+  if (modeCheck.some(isNaN)) { alert('Please fill in all fields'); return; }
   if (startAge <= currentAge) { alert('Drawdown age must be greater than current age'); return; }
 
-  // Build lump-sum additions map: { year -> amount }
+  // Lump-sum additions map
   const additions = {};
   for (let i = 1; i <= addCount; i++) {
     const yrEl = document.getElementById('add-yr-' + i);
     const amtEl = document.getElementById('add-amt-' + i);
     if (!yrEl) continue;
-    const yr = parseInt(yrEl.value);
-    const amt = parseFloat(amtEl.value);
-    if (!isNaN(yr) && !isNaN(amt) && amt > 0) {
-      additions[yr] = (additions[yr] || 0) + amt;
-    }
+    const yr = parseInt(yrEl.value), amt = parseFloat(amtEl.value);
+    if (!isNaN(yr) && !isNaN(amt) && amt > 0) additions[yr] = (additions[yr] || 0) + amt;
   }
 
-  // Collect income streams — make a live copy with currentAmount for simulation
+  // Income streams
   const streams = [];
   for (let i = 1; i <= incomeCount; i++) {
     const nameEl = document.getElementById('inc-name-' + i);
@@ -987,66 +1012,72 @@ function calcDrawdown() {
     const rawEnd   = parseInt(document.getElementById('inc-end-' + i).value);
     const growth   = (parseFloat(document.getElementById('inc-growth-' + i).value) || 0) / 100;
     const isReal   = document.getElementById('inc-real-' + i).checked;
-    // Nominal growth rate: if real, add inflation on top
-    const nominalGrowth = isReal ? growth + inflationRate : growth;
     streams.push({
-      name: nameEl.value || 'Income',
       startAge: isNaN(rawStart) ? startAge : rawStart,
-      endAge: isNaN(rawEnd) ? 999 : rawEnd,
-      nominalGrowth,
+      endAge:   isNaN(rawEnd)   ? 999      : rawEnd,
+      nominalGrowth: isReal ? growth + inflationRate : growth,
       currentAmount: amt,
     });
   }
 
-  const currentYear = new Date().getFullYear();
+  const currentYear  = new Date().getFullYear();
   const drawdownYear = currentYear + (startAge - currentAge);
   const rows = [];
-  let balance = startValue;
-  let drawdown = annualDrawdown;
-  let ranOut = null;
+  let balance  = startValue;
+  let fixedDraw = annualDrawdown;  // only used in $ mode
+  let ranOut   = null;
 
   for (let age = startAge; age <= 120; age++) {
     const year = drawdownYear + (age - startAge);
     const addition = additions[year] || 0;
 
-    // Sum active income streams this year
     let incomeThisYear = 0;
     for (const s of streams) {
       if (age >= s.startAge && age <= s.endAge) incomeThisYear += s.currentAmount;
     }
 
     const startBal = balance + addition + incomeThisYear;
-    const growth = startBal * growthRate;
-    const endBal = startBal + growth - drawdown;
+    const growth   = startBal * growthRate;
 
+    // Withdrawal this year
+    const drawdown = isPct
+      ? startBal * drawdownPct               // % of current balance
+      : fixedDraw;                           // fixed $ (inflation-adjusted each year)
+
+    const endBal = startBal + growth - drawdown;
     rows.push({ age, year, startBal, addition, income: incomeThisYear, growth, drawdown, endBal: Math.max(endBal, 0) });
     balance = endBal;
     if (balance <= 0) { ranOut = { age, year }; break; }
 
-    // Advance drawdown and income for next year
-    if (inflAdj) drawdown *= (1 + inflationRate);
+    if (inflAdj) fixedDraw *= (1 + inflationRate);
     for (const s of streams) s.currentAmount *= (1 + s.nominalGrowth);
   }
 
   const hasIncome = streams.length > 0;
+  const firstDraw = rows[0]?.drawdown ?? 0;
+  const lastDraw  = rows[rows.length - 1]?.drawdown ?? 0;
 
   // Summary
   const summaryEl = document.getElementById('ddSummary');
-  const noteEl = document.getElementById('ddNote');
+  const noteEl    = document.getElementById('ddNote');
   if (ranOut) {
     summaryEl.textContent = `Age ${ranOut.age} (${ranOut.year})`;
-    summaryEl.className = 'big-num neg';
-    const yearsLast = ranOut.age - startAge;
-    const incomePart = hasIncome ? ` Additional income streams included.` : '';
-    noteEl.textContent = `${yearsLast} year${yearsLast !== 1 ? 's' : ''} of drawdown. Net annual spend: ${aud(annualDrawdown)}.${incomePart}`;
+    summaryEl.className   = 'big-num neg';
+    const yrs = ranOut.age - startAge;
+    noteEl.textContent = `${yrs} year${yrs !== 1 ? 's' : ''} of withdrawals. ` +
+      (isPct ? `Started at ${aud(firstDraw)}/yr (${(drawdownPct*100).toFixed(1)}% of balance).`
+             : `Annual spend: ${aud(annualDrawdown)}.`) +
+      (hasIncome ? ' Income streams included.' : '');
   } else {
     summaryEl.textContent = 'Never runs out ✓';
-    summaryEl.className = 'big-num pos';
-    const incomePart = hasIncome ? ` Income streams boost longevity.` : '';
-    noteEl.textContent = `Portfolio sustains ${aud(annualDrawdown)}/yr net spend indefinitely.${incomePart}`;
+    summaryEl.className   = 'big-num pos';
+    noteEl.textContent = isPct
+      ? `${(drawdownPct*100).toFixed(1)}% withdrawal rate — balance at age 120: ${aud(rows[rows.length-1]?.endBal)}.${hasIncome ? ' Income streams included.' : ''}`
+      : `Portfolio sustains ${aud(annualDrawdown)}/yr indefinitely.${hasIncome ? ' Income streams included.' : ''}`;
   }
 
   // Table
+  const lowBal = isPct ? startValue * 0.1 : (annualDrawdown ?? firstDraw) * 3;
   document.getElementById('ddTableBody').innerHTML = rows.map(r =>
     `<tr>
       <td>${r.age}</td>
@@ -1055,12 +1086,11 @@ function calcDrawdown() {
       <td>${r.addition ? '<span class="pos">+' + aud(r.addition) + '</span>' : '—'}</td>
       <td>${r.income > 0 ? '<span class="pos">+' + aud(r.income) + '</span>' : '—'}</td>
       <td class="pos">+${aud(r.growth)}</td>
-      <td class="neg">-${aud(r.drawdown)}</td>
-      <td class="${r.endBal <= 0 ? 'neg' : r.endBal < annualDrawdown * 3 ? '' : 'pos'}">${aud(r.endBal)}</td>
+      <td class="neg">-${aud(r.drawdown)}${isPct ? ' (' + (drawdownPct*100).toFixed(1) + '%)' : ''}</td>
+      <td class="${r.endBal <= 0 ? 'neg' : r.endBal < lowBal ? '' : 'pos'}">${aud(r.endBal)}</td>
     </tr>`
   ).join('');
 
-  // Chart
   drawChart(rows);
   document.getElementById('ddResult').style.display = '';
 }
