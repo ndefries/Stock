@@ -527,27 +527,30 @@ let serverAvailable = false;
 const SB_URL = 'https://cxshscsqeqyrbnsaxfkj.supabase.co';
 const SB_KEY = 'sb_publishable_-jR0jnV-RuFtOK-aT6zUtw_1DsQ1-J6';
 const SB_HEADERS = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' };
-// Ordered list of CORS proxies — tried in sequence until one works
-const CORS_PROXIES = [
-  'https://api.allorigins.win/raw?url=',
-  'https://corsproxy.io/?url=',
-  'https://api.codetabs.com/v1/proxy?quest='
-];
+// Supabase Edge Function — fast server-side Yahoo Finance proxy
+const EDGE_FN = `${SB_URL}/functions/v1/yahoo-quote`;
+const EDGE_HEADERS = { ...SB_HEADERS };
 
+async function edgeFetch(params) {
+  const qs = new URLSearchParams(params).toString();
+  const r = await fetch(`${EDGE_FN}?${qs}`, { headers: EDGE_HEADERS, signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error('Edge function HTTP ' + r.status);
+  return r;
+}
+
+// Fallback CORS proxies (used only if Edge Function is unavailable)
 async function fetchWithProxy(url) {
-  // Try direct first (Yahoo Finance sometimes allows it)
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (r.ok) return r;
   } catch(_) {}
-  // Try each proxy in order
-  for (const proxy of CORS_PROXIES) {
+  for (const proxy of ['https://api.allorigins.win/raw?url=', 'https://corsproxy.io/?url=']) {
     try {
       const r = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
       if (r.ok) return r;
     } catch(_) {}
   }
-  throw new Error('Unable to fetch market data — all proxies failed');
+  throw new Error('All proxies failed');
 }
 
 // ═══════════════════════════════════════════════
@@ -642,7 +645,15 @@ async function fetchQuotes(symbols) {
     for (const q of (data?.quoteResponse?.result || [])) result[q.symbol] = q;
     return result;
   }
-  // Client-side: fetch each ticker via CORS proxy → Yahoo Finance chart API
+  // Client-side: use Edge Function (fast) then fall back to CORS proxy
+  try {
+    const r = await edgeFetch({ symbols: symbols.join(','), interval: '1d', range: '1d' });
+    const data = await r.json();
+    const result = {};
+    for (const q of (data?.quoteResponse?.result || [])) result[q.symbol] = q;
+    return result;
+  } catch(_) {}
+  // CORS proxy fallback
   const settled = await Promise.allSettled(symbols.map(async sym => {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`;
     const r = await fetchWithProxy(url);
@@ -1208,38 +1219,39 @@ async function showDetail(symbol) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       d = await r.json();
     } else {
-      // Client-side fallback: chart API only (no scraped fundamentals)
-      const [chartUrl, histUrl] = [
-        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`,
-        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1wk&range=1y`
-      ];
-      const [chartR, histR] = await Promise.all([
-        fetchWithProxy(chartUrl),
-        fetchWithProxy(histUrl)
-      ]);
+      // Client-side: use Edge Function for both quote and history
+      let chartR, histR;
+      try {
+        [chartR, histR] = await Promise.all([
+          edgeFetch({ symbols: symbol, interval: '1d', range: '1d' }),
+          edgeFetch({ symbols: symbol, interval: '1wk', range: '1y', mode: 'history' })
+        ]);
+      } catch(_) {
+        // CORS fallback
+        const [chartUrl, histUrl] = [
+          `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`,
+          `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1wk&range=1y`
+        ];
+        [chartR, histR] = await Promise.all([fetchWithProxy(chartUrl), fetchWithProxy(histUrl)]);
+      }
       const chartData = await chartR.json();
       const histData  = await histR.json();
-      const meta = chartData?.chart?.result?.[0]?.meta || {};
-      const q    = chartData?.chart?.result?.[0]?.indicators?.quote?.[0] || {};
-      const price = meta.regularMarketPrice, prev = meta.chartPreviousClose;
-      const histResult = histData?.chart?.result?.[0];
-      const ts = histResult?.timestamp || [];
-      const hq = histResult?.indicators?.quote?.[0] || {};
-      const history = ts.map((t,i) => ({
-        date: new Date(t*1000).toISOString().slice(0,10),
-        open: hq.open?.[i], high: hq.high?.[i], low: hq.low?.[i],
-        close: hq.close?.[i], volume: hq.volume?.[i]
-      })).filter(r => r.close != null);
-      d = {
-        symbol, shortName: meta.longName || meta.shortName || symbol,
-        regularMarketPrice: price, regularMarketOpen: q.open?.[0] ?? null,
-        regularMarketDayHigh: q.high?.[0] ?? null, regularMarketDayLow: q.low?.[0] ?? null,
-        regularMarketVolume: q.volume?.[0] ?? null, regularMarketPreviousClose: prev,
-        regularMarketChange: prev != null ? price - prev : null,
-        regularMarketChangePercent: prev != null ? ((price - prev) / prev) * 100 : null,
-        fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? null, fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? null,
-        history
-      };
+      // Edge Function returns { quoteResponse: { result: [...] } } for both modes
+      const quote = chartData?.quoteResponse?.result?.[0] || {};
+      // History mode returns { quoteResponse: { result: [{ symbol, history: [...] }] } }
+      const histRow = histData?.quoteResponse?.result?.[0];
+      const history = histRow?.history || (() => {
+        // Raw Yahoo Finance format fallback
+        const hr = histData?.chart?.result?.[0];
+        const ts = hr?.timestamp || [];
+        const hq = hr?.indicators?.quote?.[0] || {};
+        return ts.map((t,i) => ({
+          date: new Date(t*1000).toISOString().slice(0,10),
+          open: hq.open?.[i], high: hq.high?.[i], low: hq.low?.[i],
+          close: hq.close?.[i], volume: hq.volume?.[i]
+        })).filter(r => r.close != null);
+      })();
+      d = { ...quote, history };
     }
     renderDetail(d, symbol);
   } catch(e) {
