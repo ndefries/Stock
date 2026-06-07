@@ -527,7 +527,28 @@ let serverAvailable = false;
 const SB_URL = 'https://cxshscsqeqyrbnsaxfkj.supabase.co';
 const SB_KEY = 'sb_publishable_-jR0jnV-RuFtOK-aT6zUtw_1DsQ1-J6';
 const SB_HEADERS = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' };
-const CORS_PROXY = 'https://corsproxy.io/?url=';
+// Ordered list of CORS proxies — tried in sequence until one works
+const CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?url=',
+  'https://api.codetabs.com/v1/proxy?quest='
+];
+
+async function fetchWithProxy(url) {
+  // Try direct first (Yahoo Finance sometimes allows it)
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (r.ok) return r;
+  } catch(_) {}
+  // Try each proxy in order
+  for (const proxy of CORS_PROXIES) {
+    try {
+      const r = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
+      if (r.ok) return r;
+    } catch(_) {}
+  }
+  throw new Error('Unable to fetch market data — all proxies failed');
+}
 
 // ═══════════════════════════════════════════════
 //  INIT
@@ -624,7 +645,7 @@ async function fetchQuotes(symbols) {
   // Client-side: fetch each ticker via CORS proxy → Yahoo Finance chart API
   const settled = await Promise.allSettled(symbols.map(async sym => {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`;
-    const r = await fetch(CORS_PROXY + encodeURIComponent(url));
+    const r = await fetchWithProxy(url);
     if (!r.ok) return null;
     const d = await r.json();
     const res = d?.chart?.result?.[0];
@@ -1193,8 +1214,8 @@ async function showDetail(symbol) {
         `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1wk&range=1y`
       ];
       const [chartR, histR] = await Promise.all([
-        fetch(CORS_PROXY + encodeURIComponent(chartUrl)),
-        fetch(CORS_PROXY + encodeURIComponent(histUrl))
+        fetchWithProxy(chartUrl),
+        fetchWithProxy(histUrl)
       ]);
       const chartData = await chartR.json();
       const histData  = await histR.json();
