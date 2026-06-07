@@ -438,6 +438,13 @@ tbody tr:hover{background:var(--surface2)}
 let portfolio = { watchlist: [], holdings: [] };
 let priceCache = {};
 let refreshTimer = null;
+let serverAvailable = false;
+
+// Supabase credentials (safe to embed — anon/publishable key, RLS-protected)
+const SB_URL = 'https://nutrvyfqwovjaweibbpc.supabase.co';
+const SB_KEY = 'sb_publishable_-jR0jnV-RuFtOK-aT6zUtw_1DsQ1-J6';
+const SB_HEADERS = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' };
+const CORS_PROXY = 'https://corsproxy.io/?url=';
 
 // ═══════════════════════════════════════════════
 //  INIT
@@ -448,11 +455,26 @@ async function init() {
     document.body.classList.add('light');
     document.getElementById('themeToggle').textContent = '☾ Dark';
   }
-  // Load portfolio from server
+  // Detect whether local server is running
   try {
-    const r = await fetch('/api/portfolio');
-    if (r.ok) portfolio = await r.json();
-  } catch(_) {}
+    const probe = await fetch('/api/portfolio', { signal: AbortSignal.timeout(1500) });
+    serverAvailable = probe.ok;
+  } catch(_) { serverAvailable = false; }
+
+  // Load portfolio
+  if (serverAvailable) {
+    try {
+      const r = await fetch('/api/portfolio');
+      if (r.ok) portfolio = await r.json();
+    } catch(_) {}
+  } else {
+    // Load directly from Supabase
+    try {
+      const r = await fetch(`${SB_URL}/rest/v1/portfolio?key=eq.main&select=data`, { headers: SB_HEADERS });
+      const rows = await r.json();
+      if (rows.length && rows[0].data) portfolio = rows[0].data;
+    } catch(_) {}
+  }
   // Seed initial CF rows for NPV
   addCFRow(); addCFRow(); addCFRow();
   // Refresh prices
@@ -477,11 +499,22 @@ function showTab(name) {
 //  DATA PERSISTENCE
 // ═══════════════════════════════════════════════
 async function savePortfolio() {
+  if (serverAvailable) {
+    try {
+      await fetch('/api/portfolio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(portfolio)
+      });
+      return;
+    } catch(_) { serverAvailable = false; }
+  }
+  // Direct Supabase save
   try {
-    await fetch('/api/portfolio', {
+    await fetch(`${SB_URL}/rest/v1/portfolio`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(portfolio)
+      headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ key: 'main', data: portfolio, updated_at: new Date().toISOString() })
     });
   } catch(_) {}
 }
@@ -497,14 +530,38 @@ function setStatus(state, text) {
 
 async function fetchQuotes(symbols) {
   if (!symbols.length) return {};
-  const r = await fetch('/api/quote?symbols=' + symbols.join(','));
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const data = await r.json();
-  const result = {};
-  const quotes = data?.quoteResponse?.result || [];
-  for (const q of quotes) {
-    result[q.symbol] = q;
+  if (serverAvailable) {
+    const r = await fetch('/api/quote?symbols=' + symbols.join(','));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const result = {};
+    for (const q of (data?.quoteResponse?.result || [])) result[q.symbol] = q;
+    return result;
   }
+  // Client-side: fetch each ticker via CORS proxy → Yahoo Finance chart API
+  const settled = await Promise.allSettled(symbols.map(async sym => {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`;
+    const r = await fetch(CORS_PROXY + encodeURIComponent(url));
+    if (!r.ok) return null;
+    const d = await r.json();
+    const res = d?.chart?.result?.[0];
+    if (!res) return null;
+    const meta = res.meta;
+    const q = res.indicators?.quote?.[0] || {};
+    const price = meta.regularMarketPrice;
+    const prev = meta.chartPreviousClose;
+    return {
+      symbol: meta.symbol, shortName: meta.longName || meta.shortName || sym,
+      regularMarketPrice: price, regularMarketOpen: q.open?.[0] ?? null,
+      regularMarketDayHigh: q.high?.[0] ?? null, regularMarketDayLow: q.low?.[0] ?? null,
+      regularMarketVolume: q.volume?.[0] ?? null, regularMarketPreviousClose: prev,
+      regularMarketChange: prev != null ? price - prev : null,
+      regularMarketChangePercent: prev != null ? ((price - prev) / prev) * 100 : null,
+      fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? null, fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? null,
+    };
+  }));
+  const result = {};
+  for (const s of settled) if (s.status === 'fulfilled' && s.value) result[s.value.symbol] = s.value;
   return result;
 }
 
@@ -1021,9 +1078,45 @@ async function showDetail(symbol) {
   document.getElementById('dChange').textContent = '';
 
   try {
-    const r = await fetch(`/api/detail?symbol=${encodeURIComponent(symbol)}`);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const d = await r.json();
+    let d;
+    if (serverAvailable) {
+      const r = await fetch(`/api/detail?symbol=${encodeURIComponent(symbol)}`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      d = await r.json();
+    } else {
+      // Client-side fallback: chart API only (no scraped fundamentals)
+      const [chartUrl, histUrl] = [
+        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`,
+        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1wk&range=1y`
+      ];
+      const [chartR, histR] = await Promise.all([
+        fetch(CORS_PROXY + encodeURIComponent(chartUrl)),
+        fetch(CORS_PROXY + encodeURIComponent(histUrl))
+      ]);
+      const chartData = await chartR.json();
+      const histData  = await histR.json();
+      const meta = chartData?.chart?.result?.[0]?.meta || {};
+      const q    = chartData?.chart?.result?.[0]?.indicators?.quote?.[0] || {};
+      const price = meta.regularMarketPrice, prev = meta.chartPreviousClose;
+      const histResult = histData?.chart?.result?.[0];
+      const ts = histResult?.timestamp || [];
+      const hq = histResult?.indicators?.quote?.[0] || {};
+      const history = ts.map((t,i) => ({
+        date: new Date(t*1000).toISOString().slice(0,10),
+        open: hq.open?.[i], high: hq.high?.[i], low: hq.low?.[i],
+        close: hq.close?.[i], volume: hq.volume?.[i]
+      })).filter(r => r.close != null);
+      d = {
+        symbol, shortName: meta.longName || meta.shortName || symbol,
+        regularMarketPrice: price, regularMarketOpen: q.open?.[0] ?? null,
+        regularMarketDayHigh: q.high?.[0] ?? null, regularMarketDayLow: q.low?.[0] ?? null,
+        regularMarketVolume: q.volume?.[0] ?? null, regularMarketPreviousClose: prev,
+        regularMarketChange: prev != null ? price - prev : null,
+        regularMarketChangePercent: prev != null ? ((price - prev) / prev) * 100 : null,
+        fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? null, fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? null,
+        history
+      };
+    }
     renderDetail(d, symbol);
   } catch(e) {
     document.getElementById('dLoading').innerHTML = `<div style="color:var(--red);padding:40px;text-align:center">Failed to load: ${e.message}</div>`;
